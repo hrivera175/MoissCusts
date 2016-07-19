@@ -1,0 +1,305 @@
+---
+title: "Characterizing Moissanite Customers"
+output: html_document
+---
+
+#### Quick look at Moissanite Customers
+20869 of people who buy Moissanite at all, buy 33% or less. The other 2117 people buy 34% or more moissanite. These could be our "moissanite" customers. Hardcore customers as well as customers who have 3 or fewer orders have been eliminated.   
+```{r setup, echo=FALSE}
+require(gridExtra)
+require(ggplot2)
+require(kohonen)
+
+setwd("~/JewelyMkngCusts/")
+jmc <- read.csv("jwlmkngcusts.csv",header=T,sep=',')
+
+jmc <- subset(jmc,TTL_CARTS < 40 & TTL_ORDERS > 3)
+moiscust <- subset(jmc, PCT_DIAMOND_SYNTHETIC > 0)
+othercusts <- subset(jmc, PCT_DIAMOND_SYNTHETIC ==0)
+
+moiscust$decile <- with(moiscust, cut(PCT_DIAMOND_SYNTHETIC, 
+                                breaks=quantile(PCT_DIAMOND_SYNTHETIC, probs=seq(0,1, by=0.1), na.rm=TRUE), 
+                                include.lowest=TRUE))
+
+g1 <- ggplot(moiscust, aes(decile)) + geom_bar() + ggtitle("Customers (by deciles) who purchased Moissanite ")
+g2 <- t(data.frame(table(moiscust$decile)))
+mytheme <- gridExtra::ttheme_default(
+    core = list(fg_params=list(cex = 2.0)),
+    colhead = list(fg_params=list(cex = 1.0)),
+    rowhead = list(fg_params=list(cex = 1.0)))
+
+g2 <- tableGrob(g2,theme=mytheme)
+
+grid.arrange(g1,g2, heights=c(3,1))
+
+ggplot(moiscust, aes(PCT_DIAMOND_SYNTHETIC)) +geom_histogram(bins=100) +geom_vline(xintercept=0.33) + annotate('text',label="20869 (out of 22986, 90%)\n customers buy 33% or less of Moissanite", x=0.5, y = 1000) + ggtitle("Distirbution of Customers who Purchase Moissanite")
+```
+
+#### Let's see if these customers group together during SOM
+First I cap off variables at 0.01 and 0.98 to get rid of extreme outliers. The data is then scaled and coverted to a matrix for the process.
+
+Variables used in the algorithm | RFMs were not used 
+--------------------------------|---------------------------
+TTL_GPS                         | TTL_NET_REV
+TTL_GM                          | TTL_ORDERS
+TTL_CARTS                       | TTL_QTY
+PCT_ORDERS_DISC                 | TTL_DISC_AMT
+PCT_JWL                         | PCT_GEM
+PCT_COLOR_SILVER                | PCT_GEMSTONES_DEPT
+PCT_DIAMOND_GOLD                | PCT_DIAMOND_SILVER
+PCT_COLOR_GOLD                  | PCT_KITS
+PCT_PEARLS                      | PCT_GEM_GIFTS
+PCT_BELLA_LUCE                  | PCT_JWL_MAKING
+PCT_WATCHES                     | PCT_COLOR_PLATED
+PCT_GOLD                        | PCT_COSTUME
+PCT_DIAMOND_SYNTHETIC           | PCT_OTHER_DEPT
+PCT_BROAD                       | PCT_INET
+PCT_OTHER                       | PCT_BROAD_INFL
+PCT_SP                          | TTL_RETURN_AMT
+TTL_SHIP                        | AVG_ORDER_VAL
+AVG_PRICEPT                     | AVG_DAYS_BTW_ORDS
+```{r, echo=FALSE}
+#function to cap variables at some percentile
+capVector <- function(x,probs=c(0.01,0.98)) {
+  ranges <- quantile(x, probs=probs, na.rm=T)
+  x[x < ranges[1]] <- ranges[1]
+  x[x > ranges[2]] <- ranges[2]
+  return(x)
+}
+
+#variables deleted: DUPL_ID, VC_CLUSTER, LAYER_RANK,RFM_RECENCY,RFM_FREQUENCY,RFM_MONETARY, DAYPART_BIN,TIMERANGE_BIN PCT_DAYPART_BIN, TTL_DISC_ORDERS, TTL_JWL_ORDERS, TTL_GEM_ORDERS, TTL_BROAD_ORDERS, TTL_INET_ORDERS, TTL_OTHER_ORDERS, TTL_BROAD_INFL_ORDERS, TTL_PA_ORDERS, PCT_PA, TTL_SP_ORDERS, LTY_REW_LVL, NEW_CUST, NEW_PA_CUST
+
+moisscustomers <- moiscust[,-c(1:9,16,19,21,39,41,43,45,47:49,51:53,59:61)]
+moisscustomers[is.na(moisscustomers)] <- 0
+
+moissnooutliers <- data.frame(matrix(ncol=36,nrow=22986))
+
+for(i in 1:36) {
+  moissnooutliers[,i] <- capVector(moisscustomers[,i])
+}
+
+colnames(moissnooutliers)[1:36] <- names(moisscustomers)
+
+mois_std <- as.matrix(scale(moissnooutliers))
+
+
+set.seed(123)
+fa_standard.som <- som(mois_std, grid=somgrid(20,20,'hexagonal'),keep.data=T)
+par(mfrow=c(1,2))
+plot(fa_standard.som,type='changes')
+p <- plot(fa_standard.som,type='counts')
+```
+
+
+#### What exactly do the colors on the Moissanite chart mean?
+The actual percentages were scaled and those scaled values correspond to "code" values that are then plotted. Note: higher and lower values got forced to 0.01th percentile and 98th percentile. 
+```{r,echo=FALSE}
+# function to color the plot
+coolBlueHotRed <- function(n, alpha = 1) {
+rainbow(n, end=4/6, alpha=alpha)[n:1]
+}
+
+#contains actual moiss %, scaled moiss %, and the corresponding codes
+moissnooutliers <- moissnooutliers[order(moissnooutliers$PCT_DIAMOND_SYNTHETIC),]
+moisact <- unique(moissnooutliers$PCT_DIAMOND_SYNTHETIC)
+
+moisscaled <- sort(fa_standard.som$data[,25])
+moisscaled <- unique(moisscaled)
+
+moisvalues <- cbind.data.frame(moisact,moisscaled)
+
+par(mfrow=c(2,2))
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,25], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[25]) 
+
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,1], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[1]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,2], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[2]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,3], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[3]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,4], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[4]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,5], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[5]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,6], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[6]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,7], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[7]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,8], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[8]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,9], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[9]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,10], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[10]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,11], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[11]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,12], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[12]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,13], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[13]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,14], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[14]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,15], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[15]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,16], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[16]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,17], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[17]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,18], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[18]) 
+
+
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,19], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[19]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,20], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[20]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,21], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[21]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,22], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[22]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,23], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[23]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,24], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[24]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,26], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[26]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,27], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[27]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,28], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[28]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,29], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[29]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,30], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[30]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,31], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[31]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,32], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[32]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,33], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[33]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,34], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[34]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,35], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[35]) 
+plot(fa_standard.som, type="property",property=fa_standard.som$codes[,36], palette.name = coolBlueHotRed, main = colnames(fa_standard.som$data)[36]) 
+
+```
+
+
+#### How do these results look up against the larger customer base?
+```{r}
+
+othercustomers <- othercusts[,-c(1:9,16,19,21,39,41,43,45,47:49,51:53,59:61)]
+othercustomers[is.na(othercustomers)] <- 0
+
+othernooutliers <- data.frame(matrix(ncol=36,nrow=259550))
+
+
+for(i in 1:36) {
+  othernooutliers[,i] <- capVector(othercustomers[,i])
+}
+
+colnames(othernooutliers)[1:36] <- names(othercustomers)
+
+other_std <- as.matrix(scale(othernooutliers))
+other_std <- other_std[,-25]
+
+
+set.seed(123)
+lrgcustbase.som <- som(other_std, grid=somgrid(20,20,'hexagonal'),keep.data=T)
+par(mfrow=c(1,2))
+plot(lrgcustbase.som,type='changes')
+p <- plot(lrgcustbase.som,type='counts')
+par(mfrow=c(2,2))
+
+
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,1], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[1]) 
+plot(fa_standard.som, type="property",property=lrgcustbase.som$codes[,2], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[2]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,3], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[3]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,4], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[4]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,5], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[5]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,6], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[6]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,7], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[7]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,8], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[8]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,9], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[9]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,10], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[10]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,11], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[11]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,12], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[12]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,13], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[13]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,14], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[14]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,15], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[15]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,16], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[16]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,17], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[17]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,18], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[18]) 
+
+
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,19], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[19]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,20], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[20]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,21], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[21]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,22], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[22]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,23], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[23]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,24], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[24]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,25], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[25]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,26], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[26]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,27], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[27]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,28], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[28]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,29], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[29]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,30], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[30]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,31], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[31]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,32], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[32]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,33], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[33]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,34], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[34]) 
+plot(lrgcustbase.som, type="property",property=lrgcustbase.som$codes[,35], palette.name = coolBlueHotRed, main = colnames(lrgcustbase.som$data)[35]) 
+
+
+```
+
+
+```{r,echo=FALSE}
+#variables deleted: DUPL_ID, VC_CLUSTER, LAYER_RANK,DAYPART_BIN,TIMERANGE_BIN, PCT_DAYPART_BIN, TTL_DISC_ORDERS, TTL_JWL_ORDERS, TTL_GEM_ORDERS, TTL_BROAD_ORDERS, TTL_INET_ORDERS, TTL_OTHER_ORDERS, TTL_BROAD_INFL_ORDERS, TTL_PA_ORDERS, PCT_PA, TTL_SP_ORDERS, LTY_REW_LVL, NEW_CUST, NEW_PA_CUST
+
+moisscustomersRFM <- moiscust[,-c(1:3,7:9,16,19,21,39,41,43,45,47:49,51:53,59:61)]
+moisscustomersRFM[is.na(moisscustomersRFM)] <- 0
+
+moissnooutliersRFM <- data.frame(matrix(ncol=39,nrow=22986))
+
+for(i in 1:39) {
+  moissnooutliersRFM[,i] <- capVector(moisscustomersRFM[,i])
+}
+
+colnames(moissnooutliersRFM)[1:39] <- names(moisscustomersRFM)
+
+mois_stdRFM <- as.matrix(scale(moissnooutliersRFM))
+
+
+
+
+set.seed(123)
+fa_standard.somRFM <- som(mois_stdRFM, grid=somgrid(20,20,'hexagonal'),keep.data=T)
+par(mfrow=c(1,1))
+plot(fa_standard.somRFM,type='changes')
+plot(fa_standard.somRFM,type='counts')
+
+
+# function to color the plot
+coolBlueHotRed <- function(n, alpha = 1) {
+rainbow(n, end=4/6, alpha=alpha)[n:1]
+}
+
+par(mfrow=c(2,2))
+plot(fa_standard.somRFM,type='counts')
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,28], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[28]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,1], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[1]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,2], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[2]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,3], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[3]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,4], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[4]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,5], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[5]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,6], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[6]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,7], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[7]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,8], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[8]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,9], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[9]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,10], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[10]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,11], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[11]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,12], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[12]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,13], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[13]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,14], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[14]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,15], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[15]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,16], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[16]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,17], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[17]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,18], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[18]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,19], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[19]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,20], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[20]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,21], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[21]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,22], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[22]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,23], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[23]) 
+
+ 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,24], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[24]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,26], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[26]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,27], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[27]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,25], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[25]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,29], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[29]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,30], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[30]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,31], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[31]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,32], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[32]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,33], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[33]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,34], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[34]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,35], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[35]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,36], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[36])
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,37], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[37]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,38], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[38]) 
+plot(fa_standard.somRFM, type="property",property=fa_standard.somRFM$codes[,39], palette.name = coolBlueHotRed, main = colnames(fa_standard.somRFM$data)[39]) 
+
+
+```
+
+
+
+
+
